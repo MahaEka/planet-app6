@@ -1,9 +1,9 @@
 name: Deploy to EC2
 
 on:
-   push:
-      branches:
-         - main
+  push:
+    branches:
+      - main
 
 jobs:
   deploy:
@@ -11,21 +11,34 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy via SSH to EC2
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            REGISTRY=${{ secrets.REGISTRY }}
-            REPO_NAME=myapp
-            IMAGE_TAG=latest
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-            aws ecr get-login-password --region us-west-1 | docker login --username AWS --password-stdin $REGISTRY
-            docker pull $REGISTRY/$REPO_NAME:$IMAGE_TAG
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-west-1
 
-            docker stop myapp || true
-            docker rm myapp || true
+    - name: Login to Amazon ECR
+      run: |
+        aws ecr get-login-password --region us-west-1 | docker login --username AWS --password-stdin ${{ secrets.REGISTRY }}
 
-            docker run -d --name myapp -p 80:80 $REGISTRY/$REPO_NAME:$IMAGE_TAG
+    - name: Build and Push Docker Image
+      run: |
+        docker build -t myapp .
+        docker tag myapp:latest ${{ secrets.REGISTRY }}/myapp:latest
+        docker push ${{ secrets.REGISTRY }}/myapp:latest
+
+    - name: Deploy to EC2 via SSH
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          docker stop myapp || true
+          docker rm myapp || true
+          docker pull ${{ secrets.REGISTRY }}/myapp:latest
+          docker run -d --name myapp -p 80:80 ${{ secrets.REGISTRY }}/myapp:latest
